@@ -17,7 +17,8 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 
 public class HookIntent implements HookInterface {
-    private static final String TAG = "HookIntent";
+    private static final String TAG_ACTIVITY = "HookActivity";
+    private static final String TAG_SERVICE = "HookService";
     @Override
     public void onHookPackage(XC_LoadPackage.LoadPackageParam loadPackageParam) {
         if (loadPackageParam.packageName.equals("android")) {
@@ -33,20 +34,20 @@ public class HookIntent implements HookInterface {
                                     "com.android.server.wm.ActivityStarter$Request",
                                     loadPackageParam.classLoader);
                             if (requestClass == null) {
-                                Log.e(TAG, "requestClass == null");
+                                Log.e(TAG_ACTIVITY, "requestClass == null");
                                 return;
                             }
                             Field intentField = XposedHelpers.findFieldIfExists(requestClass,
                                     "intent");
                             if (intentField == null) {
-                                Log.e(TAG, "intentField == null");
+                                Log.e(TAG_ACTIVITY, "intentField == null");
                                 return;
                             }
                             Intent intent = (Intent) intentField.get(request);
                             try {
-                                logIntent(intent, "startActivity");
+                                logIntent(intent, "startActivity", TAG_ACTIVITY);
                             } catch (Exception e) {
-                                Log.e(TAG, "Cannot log Intent.", e);
+                                Log.e(TAG_ACTIVITY, "Cannot log Intent.", e);
                             }
                         }
                     }).build();
@@ -63,9 +64,9 @@ public class HookIntent implements HookInterface {
                         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                             Intent service = (Intent) param.args[1];
                             try {
-                                logIntent(service, "startService");
+                                logIntent(service, "startService", TAG_SERVICE);
                             } catch (Exception e) {
-                                Log.e(TAG, "Cannot log Intent.", e);
+                                Log.e(TAG_SERVICE, "Cannot log Intent.", e);
                             }
                         }
                     }).build();
@@ -86,9 +87,9 @@ public class HookIntent implements HookInterface {
                         protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                             Intent service = (Intent) param.args[2];
                             try {
-                                logIntent(service, "bindService");
+                                logIntent(service, "bindService", TAG_SERVICE);
                             } catch (Exception e) {
-                                Log.e(TAG, "Cannot log Intent.", e);
+                                Log.e(TAG_SERVICE, "Cannot log Intent.", e);
                             }
                         }
                     }).build();
@@ -96,21 +97,21 @@ public class HookIntent implements HookInterface {
         }
     }
 
-    public void logIntent(Intent intent, String operation) {
-        Log.i(TAG, operation);
+    public void logIntent(Intent intent, String operation, String tag) {
+        Log.i(tag, operation);
         if (intent != null) {
-            Log.i(TAG, intent.toString());
+            Log.i(tag, intent.toString());
             if (intent.getData() != null && !intent.getDataString().isEmpty()) {
-                Log.i(TAG, intent.getDataString());
+                Log.i(tag, intent.getDataString());
             }
             Bundle extras = intent.getExtras();
-            logBundle(extras, true);
+            logBundle(extras, true, tag);
         } else {
-            Log.e(TAG, "intent == null");
+            Log.e(tag, "intent == null");
         }
     }
 
-    public void logBundle(Bundle bundle, boolean isExtra) {
+    public void logBundle(Bundle bundle, boolean isExtra, String tag) {
         if (bundle != null) {
             String prefix = isExtra ? "extra" : "bundle";
             for (String key : bundle.keySet()) {
@@ -119,19 +120,27 @@ public class HookIntent implements HookInterface {
                     // Another bundle object
                     Class<?> clazz = value.getClass();
                     if (clazz.getName().equals(Bundle.class.getName())) {
-                        logBundle((Bundle) value, false);
+                        logBundle((Bundle) value, false, tag);
                     } else if (clazz.isArray()){
-                        List<Object> valueList = Arrays.asList((Object[]) value);
-                        Log.i(TAG, "[" + prefix + "] " +
-                                key + " `" + clazz.getName() + "`: " +
-                                logValue(valueList));
+                        Class<?> arrayCompType = clazz.getComponentType();
+                        if (arrayCompType != null && !arrayCompType.isPrimitive()) {
+                            List<Object> valueList = Arrays.asList((Object[]) value);
+                            Log.i(tag, "[" + prefix + "] " +
+                                    key + " `" + clazz.getName() + "`: " +
+                                    logValue(valueList));
+                        } else {
+                            Log.i(tag, "[" + prefix + "] " +
+                                    key + " `" + clazz.getName() + "`: " +
+                                    logValue(value));
+                        }
+
                     } else {
-                        Log.i(TAG, "[" + prefix + "] " +
+                        Log.i(tag, "[" + prefix + "] " +
                                 key + " `" + clazz.getName() + "`: " +
                                 logValue(value));
                     }
                 } else {
-                    Log.i(TAG, "[" + prefix + "] " +
+                    Log.i(tag, "[" + prefix + "] " +
                             key + ": null");
                 }
             }
