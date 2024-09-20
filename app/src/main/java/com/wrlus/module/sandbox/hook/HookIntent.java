@@ -1,5 +1,7 @@
 package com.wrlus.module.sandbox.hook;
 
+import android.app.ActivityOptions;
+import android.content.ClipData;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -28,27 +30,37 @@ public class HookIntent implements HookInterface {
                     .addParameter("com.android.server.wm.ActivityStarter$Request")
                     .setCallback(new XC_MethodHook() {
                         @Override
-                        protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                        protected void afterHookedMethod(MethodHookParam param) {
                             Object request = param.args[0];
-                            Class<?> requestClass = XposedHelpers.findClassIfExists(
-                                    "com.android.server.wm.ActivityStarter$Request",
-                                    loadPackageParam.classLoader);
-                            if (requestClass == null) {
-                                Log.e(TAG_ACTIVITY, "requestClass == null");
-                                return;
-                            }
-                            Field intentField = XposedHelpers.findFieldIfExists(requestClass,
-                                    "intent");
-                            if (intentField == null) {
-                                Log.e(TAG_ACTIVITY, "intentField == null");
-                                return;
-                            }
-                            Intent intent = (Intent) intentField.get(request);
                             try {
-                                logIntent(intent, "startActivity", TAG_ACTIVITY);
-                            } catch (Exception e) {
-                                Log.e(TAG_ACTIVITY, "Cannot log Intent.", e);
+                                Class<?> requestClass = Class.forName("com.android.server.wm.ActivityStarter$Request",
+                                        false, loadPackageParam.classLoader);
+                                Field intentField = requestClass.getDeclaredField("intent");
+                                intentField.setAccessible(true);
+                                Intent intent = (Intent) intentField.get(request);
+                                try {
+                                    logIntent(intent, "startActivity", TAG_ACTIVITY);
+                                } catch (Exception e) {
+                                    Log.e(TAG_ACTIVITY, "Cannot log Intent.", e);
+                                }
+
+                                Field activityOptionsField = requestClass.getDeclaredField("activityOptions");
+                                activityOptionsField.setAccessible(true);
+                                Class<?> safeActivityOptionsClass = Class.forName("com.android.server.wm.SafeActivityOptions",
+                                        false, loadPackageParam.classLoader);
+                                Field originalOptionsField = safeActivityOptionsClass.getDeclaredField("mOriginalOptions");
+                                originalOptionsField.setAccessible(true);
+                                ActivityOptions options = (ActivityOptions)
+                                        originalOptionsField.get(activityOptionsField.get(request));
+                                try {
+                                    logBundle(options.toBundle(), "ActivityOptions", TAG_ACTIVITY);
+                                } catch (Exception e) {
+                                    Log.e(TAG_ACTIVITY, "Cannot log Intent.", e);
+                                }
+                            } catch (ReflectiveOperationException e) {
+                                Log.e(TAG_ACTIVITY, "ReflectiveOperationException", e);
                             }
+
                         }
                     }).build();
             MethodHook startServiceHooker = new MethodHook.Builder(
@@ -97,57 +109,64 @@ public class HookIntent implements HookInterface {
         }
     }
 
-    public void logIntent(Intent intent, String operation, String tag) {
+    public static void logIntent(Intent intent, String operation, String tag) {
         Log.i(tag, operation);
         if (intent != null) {
-            Log.i(tag, intent.toString());
+            Log.i(tag, "[Intent] " + intent);
             if (intent.getData() != null && !intent.getDataString().isEmpty()) {
-                Log.i(tag, intent.getDataString());
+                Log.i(tag, "[Data] " + intent.getDataString());
+            }
+            if (intent.getClipData() != null) {
+                ClipData clipData = intent.getClipData();
+                for (int i = 0; i < clipData.getItemCount(); ++i) {
+                    ClipData.Item item = clipData.getItemAt(i);
+                    Log.i(tag, "[ClipData] " + item.getText());
+                }
             }
             Bundle extras = intent.getExtras();
-            logBundle(extras, true, tag);
+            logBundle(extras, "Extras", tag);
         } else {
             Log.e(tag, "intent == null");
         }
     }
 
-    public void logBundle(Bundle bundle, boolean isExtra, String tag) {
+    public static void logBundle(Bundle bundle, String operation, String tag) {
         if (bundle != null) {
-            String prefix = isExtra ? "extra" : "bundle";
             for (String key : bundle.keySet()) {
                 Object value = bundle.get(key);
                 if (value != null) {
                     // Another bundle object
                     Class<?> clazz = value.getClass();
                     if (clazz.getName().equals(Bundle.class.getName())) {
-                        logBundle((Bundle) value, false, tag);
+                        Log.i(tag, "[" + operation + "] " +
+                                key + " `" + clazz.getName() + "`: ");
+                        logBundle((Bundle) value, "Bundle", tag);
                     } else if (clazz.isArray()){
                         Class<?> arrayCompType = clazz.getComponentType();
                         if (arrayCompType != null && !arrayCompType.isPrimitive()) {
                             List<Object> valueList = Arrays.asList((Object[]) value);
-                            Log.i(tag, "[" + prefix + "] " +
+                            Log.i(tag, "[" + operation + "] " +
                                     key + " `" + clazz.getName() + "`: " +
                                     logValue(valueList));
                         } else {
-                            Log.i(tag, "[" + prefix + "] " +
+                            Log.i(tag, "[" + operation + "] " +
                                     key + " `" + clazz.getName() + "`: " +
                                     logValue(value));
                         }
-
                     } else {
-                        Log.i(tag, "[" + prefix + "] " +
+                        Log.i(tag, "[" + operation + "] " +
                                 key + " `" + clazz.getName() + "`: " +
                                 logValue(value));
                     }
                 } else {
-                    Log.i(tag, "[" + prefix + "] " +
+                    Log.i(tag, "[" + operation + "] " +
                             key + ": null");
                 }
             }
         }
     }
 
-    public String logValue(Object value) {
+    public static String logValue(Object value) {
         return value.toString();
     }
 }
